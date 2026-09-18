@@ -733,6 +733,66 @@ private :
         qInfo() << countInBound50 << "/" << nTested << " coefficient are within 50% of gt";
         qInfo() << countInBound100 << "/" << nTested << " coefficient are within 100% of gt";
 
+        if (offDiagonal) {
+
+            int countInBound05 = 0;
+            int countInBound10 = 0;
+            int countInBound20 = 0;
+            int countInBound50 = 0;
+            int countInBound100 = 0;
+
+            constexpr double minVarThresh = 1e-6;
+
+            for (int i = 0; i < nTested; i++) {
+                Eigen::VectorXd b = Eigen::VectorXd::Zero(n);
+                auto idx = idxs[diagIdxs[i]];
+                b[idx.j] = 1;
+                Eigen::VectorXd x = solver.solve(b);
+                double gt = x[idx.i];
+                double varj = x[idx.j];
+                b[idx.j] = 0;
+                b[idx.i] = 1;
+                x = solver.solve(b);
+                double vari = x[idx.i];
+                double est = estimates[diagIdxs[i]];
+                double error = std::abs(est - gt);
+
+                double thresh = std::max(std::abs(sqrt(vari*varj)),minVarThresh);
+
+                bool ok05 = error < 0.05*thresh;
+                if (ok05) {
+                    countInBound05++;
+                }
+
+                bool ok10 = error < 0.1*thresh;
+                if (ok10) {
+                    countInBound10++;
+                }
+
+                bool ok20 = error < 0.2*thresh;
+                if (ok20) {
+                    countInBound20++;
+                }
+
+                bool ok50 = error < 0.5*thresh;
+                if (ok50) {
+                    countInBound50++;
+                }
+
+                bool ok100 = error < thresh;
+                if (ok100) {
+                    countInBound100++;
+                }
+            }
+
+            qInfo() << countInBound05 << "/" << nTested << " coefficient are within 5% of Corr100% from gt";
+            qInfo() << countInBound10 << "/" << nTested << " coefficient are within 10% of Corr100% from gt";
+            qInfo() << countInBound20 << "/" << nTested << " coefficient are within 20% of Corr100% from gt";
+            qInfo() << countInBound50 << "/" << nTested << " coefficient are within 50% of Corr100% from gt";
+            qInfo() << countInBound100 << "/" << nTested << " coefficient are within 100% of Corr100% from gt";
+
+        }
+
     }
 
 };

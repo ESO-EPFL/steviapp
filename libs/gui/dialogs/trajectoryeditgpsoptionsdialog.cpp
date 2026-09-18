@@ -29,7 +29,7 @@ TrajectoryEditGpsOptionsDialog::TrajectoryEditGpsOptionsDialog(QWidget* parent) 
     formLayout->addRow(tr("GPS EPSG: "), _epsgLine);
 
     _topocentricConventionBox = new QComboBox(this);
-    QMetaEnum topoConv = QMetaEnum::fromType<Trajectory::TopocentricConvention>();
+    QMetaEnum topoConv = QMetaEnum::fromType<Trajectory::TopocentricConventionInternal>();
 
     for (int i = 0; i < topoConv.keyCount(); i++) {
         const char* key = topoConv.key(i);
@@ -211,7 +211,7 @@ void TrajectoryEditGpsOptionsDialog::ConfigureTrajectoryGpsOptions(Trajectory* t
         traj->setGpsFile("");
 
         traj->setGpsEpsg("");
-        traj->setGpsTopocentricConvention(Trajectory::NED);
+        traj->setGpsTopocentricConvention(Geo::NED);
 
         traj->setGpsTimeScale(1);
         traj->setGpsTimeDelta(0);
@@ -254,7 +254,7 @@ void TrajectoryEditGpsOptionsDialog::ConfigureTrajectoryGpsOptions(Trajectory* t
 
         traj->setGpsEpsg(dialog._epsgLine->text());
         traj->setGpsTopocentricConvention(
-            static_cast<Trajectory::TopocentricConvention>(
+            static_cast<Geo::TopocentricConvention>(
                 dialog._topocentricConventionBox->currentData().toInt()));
 
         traj->setGpsTimeScale(dialog._timeScaleSpinBox->value());

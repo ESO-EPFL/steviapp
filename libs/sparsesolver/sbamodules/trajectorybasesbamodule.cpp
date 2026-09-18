@@ -1169,7 +1169,7 @@ StatusOptionalReturn<void> TrajectoryBaseSBAModule::addGpsVelocityObs(
     Eigen::Vector3d vec;
 
     //speed in local frame
-    vec = world2local*gpsVelocitySeq[currentGPSVelocityNode].val;
+    vec = world2local.R*gpsVelocitySeq[currentGPSVelocityNode].val;
 
     int gpsMountingId = traj->gpsMountingId();
 

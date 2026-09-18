@@ -65,12 +65,14 @@ public:
     };
     Q_ENUM(VariableType)
 
-    enum TopocentricConvention {
-        NED = Geo::TopocentricConvention::NED ,
-        ENU = Geo::TopocentricConvention::ENU,
-        NWU = Geo::TopocentricConvention::NWU
+    using TopocentricConvention = Geo::TopocentricConvention;
+    enum TopocentricConventionInternal {
+        NED = Geo::TopocentricConvention::NED, //North East Down
+        ENU = Geo::TopocentricConvention::ENU, //East North Up
+        NWU = Geo::TopocentricConvention::NWU, //North West Up
     };
-    Q_ENUM(TopocentricConvention)
+
+    Q_ENUM(TopocentricConventionInternal)
 
     enum AngleRepresentation {
         AxisAngle,
@@ -113,6 +115,13 @@ public:
         std::optional<TimeCartesianSequence> velocities;
         std::optional<TimeVarianceSequence> posSigma;
         std::optional<TimeVarianceSequence> velocitySigma;
+    };
+
+    struct RawGpsData {
+        std::optional<std::vector<TimeCartesianBlock>> position;
+        std::optional<std::vector<TimeCartesianBlock>> velocities;
+        std::optional<std::vector<TimeVarianceBlock>> posSigma;
+        std::optional<std::vector<TimeVarianceBlock>> speedSigma;
     };
 
     struct InsStochasticProcessDef {
@@ -783,13 +792,6 @@ protected:
      * \return a vector of time position blocks
      */
     StatusOptionalReturn<std::vector<TimeCartesianBlock>> loadPositionData() const;
-
-    struct RawGpsData {
-        std::optional<std::vector<TimeCartesianBlock>> position;
-        std::optional<std::vector<TimeCartesianBlock>> velocities;
-        std::optional<std::vector<TimeVarianceBlock>> posSigma;
-        std::optional<std::vector<TimeVarianceBlock>> speedSigma;
-    };
 
     StatusOptionalReturn<RawGpsData> loadGPSData() const;
     virtual StatusOptionalReturn<RawGpsData> loadRawGPSData() const;

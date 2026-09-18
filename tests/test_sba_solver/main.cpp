@@ -21,6 +21,8 @@
 #include "../../libs/sparsesolver/sbamodules/mountingssbamodule.h"
 
 #include "../../libs/testutils/datablocks/generatedtrajectory.h"
+#include "../../libs/testutils/waypointssimulatedtrajectorysmoother.h"
+#include "../../libs/testutils/eceftrajectoryinertialinstrumentssimulator.h"
 
 #include "../../libs/geo/wgs84.h"
 
@@ -50,6 +52,10 @@ private Q_SLOTS:
 
     void testFixedWithEarthGravity();
     void testWithEarthGravity();
+    /*!
+     * \brief testWaypointTrajectoryArpette simulated flights with waypoints above val d'arpette
+     */
+    void testWaypointTrajectoryArpette();
 
 protected:
 
@@ -991,8 +997,9 @@ void TestSBASolver::movingBody2MovingBody() {
         correspSet->addCorrespondence({xyztCorresp1, xyztCorresp2});
     }
 
+    constexpr bool computeUncertainty = false;
 
-    StereoVisionApp::ModularSBASolver sbaSolver(&project);
+    StereoVisionApp::ModularSBASolver sbaSolver(&project, computeUncertainty);
     sbaSolver.setSilent(true);
 
     StereoVisionApp::TrajectoryBaseSBAModule* trajSBAModule =
@@ -1148,8 +1155,9 @@ void TestSBASolver::testFixedWithEarthGravity() {    StereoVisionApp::ProjectFac
     traj->setAccAccuracy(0.5);
 
 
+    constexpr bool computeUncertainty = false;
 
-    StereoVisionApp::ModularSBASolver sbaSolver(&project);
+    StereoVisionApp::ModularSBASolver sbaSolver(&project, computeUncertainty);
     sbaSolver.setSilent(true);
     sbaSolver.setFuncTolerance(1e-8);
     sbaSolver.setParamsTolerance(1e-10);
@@ -1418,8 +1426,9 @@ void TestSBASolver::testWithEarthGravity() {
     traj->setAccAccuracy(0.5);
 
 
+    constexpr bool computeUncertainty = false;
 
-    StereoVisionApp::ModularSBASolver sbaSolver(&project);
+    StereoVisionApp::ModularSBASolver sbaSolver(&project, computeUncertainty);
     sbaSolver.setSilent(true);
     sbaSolver.setFuncTolerance(1e-8);
     sbaSolver.setParamsTolerance(1e-10);
@@ -1526,6 +1535,284 @@ void TestSBASolver::testWithEarthGravity() {
     QVERIFY(meanPosDelta.norm() < biasThresholdOrientation);
     QVERIFY(meanRotDelta.norm() < biasThresholdOrientation);
 
+}
+void TestSBASolver::testWaypointTrajectoryArpette() {
+
+    StereoVisionApp::ProjectFactory& pF = StereoVisionApp::ProjectFactory::defaultProjectFactory();
+
+    StereoVisionApp::Project* pPtr = pF.createProject(this);
+
+    QVERIFY(pPtr != nullptr);
+
+    StereoVisionApp::Project& project = *pPtr;
+    const char* ecefCRS = "EPSG:4978";
+
+    project.setDefaultProjectCRS(ecefCRS);
+
+    std::vector<std::array<double,3>> waypointsLatLonHeight = {
+        {46.03565599595825, 7.089615022981861, 1799.531696490634},
+        {46.02236597934959, 7.100801500967546, 2079.217496895602},
+        {46.02146192956894, 7.098090353995183, 2151.688920219349},
+        {46.03492177897298, 7.087220353061962, 1878.258324937554}
+    };
+
+    std::vector<std::array<double,3>> waypointsECEF(waypointsLatLonHeight.size());
+
+    Eigen::Vector3d meanPos = Eigen::Vector3d::Zero();
+
+    for (size_t i = 0; i < waypointsLatLonHeight.size(); i++) {
+        waypointsECEF[i] = StereoVisionApp::Geo::WGS84Ellipsoid::LatLonHeight2ECEF(waypointsLatLonHeight[i]);
+        for (int j = 0; j < 3; j++) {
+            meanPos[j] += waypointsECEF[i][j];
+        }
+    }
+
+    meanPos /= waypointsECEF.size();
+
+    qInfo() << "Mean pos: " << meanPos.x() << " " << meanPos.y() << " " << meanPos.z();
+
+    StereoVision::Geometry::AffineTransform<double> ecef2Local(Eigen::Matrix3d::Identity(),
+                                                               -meanPos);
+
+    StereoVision::Geometry::AffineTransform<double> local2Ecef(ecef2Local.R.transpose(), -ecef2Local.R.transpose()*ecef2Local.t);
+
+    project.setLocalCoordinateFrame(ecef2Local);
+
+    qint64 trajectoryId = project.createDataBlock(StereoVisionApp::Trajectory::staticMetaObject.className());
+
+    StereoVisionApp::Trajectory* traj = project.getDataBlock<StereoVisionApp::Trajectory>(trajectoryId);
+
+    QVERIFY(traj != nullptr);
+
+    StereoVisionApp::GeneratedTrajectory* genTraj = qobject_cast<StereoVisionApp::GeneratedTrajectory*>(traj);
+
+    QVERIFY(genTraj != nullptr);
+
+    genTraj->setPositionEpsg(ecefCRS);
+
+    int freqGps = 2; // gps sampling freq Hz
+    int freqIns = 10; // ins sampling freq Hz
+
+    int tickGPS = freqIns/freqGps;
+
+    double dtPos = 1./freqGps;
+    double dtAcc = 1./freqIns;
+    double dt = std::min(dtAcc, dtPos);
+
+    QVERIFY(dt > 0);
+    QVERIFY(dtPos*freqGps > 0.99);
+    QVERIFY(dtAcc*freqIns > 0.99);
+
+    double speed = 50; // 50 m/s
+    double smoothTime = 4; // 0.5 s
+
+    StereoVisionApp::Simulation::WayPointsEcefTrajectoryFunctor* trajFunctor =
+        new StereoVisionApp::Simulation::WayPointsEcefTrajectoryFunctor(waypointsECEF,speed,smoothTime);
+
+    StereoVisionApp::Simulation::EcefTrajectoryInertialInstrumentsSimulator staticTrajSimulator(trajFunctor);
+
+    auto wayPointsInternal = trajFunctor->orientationWaypoints();
+    double t0 = wayPointsInternal.times.front();
+    double tf = wayPointsInternal.times.back();
+
+    int nSamples = std::ceil((tf-t0)/dt);
+    int nSamplesGps = std::ceil((tf-t0)/dtPos);
+
+    double currentT = t0;
+    int tickCount = 0;
+
+    std::vector<StereoVisionApp::Trajectory::TimeCartesianBlock> posCache;
+    std::vector<StereoVisionApp::Trajectory::TimeCartesianBlock> orientCache;
+    StereoVisionApp::Trajectory::RawGpsData gpsCache;
+    std::vector<StereoVisionApp::Trajectory::TimeCartesianBlock> gyroCache;
+    std::vector<StereoVisionApp::Trajectory::TimeCartesianBlock> accCache;
+
+    posCache.reserve(nSamplesGps);
+    orientCache.reserve(nSamplesGps);
+    gpsCache.position = std::vector<StereoVisionApp::Trajectory::TimeCartesianBlock>();
+    gpsCache.position->reserve(nSamplesGps);
+    /*gpsCache.velocities = std::vector<StereoVisionApp::Trajectory::TimeCartesianBlock>();
+    gpsCache.velocities->reserve(nSamplesGps);*/
+
+    gyroCache.reserve(nSamples);
+    accCache.reserve(nSamples);
+
+    constexpr StereoVisionApp::Geo::TopocentricConvention topocentricConvention = StereoVisionApp::Geo::ENU;
+
+    while (currentT < tf) {
+
+        if (tickCount % tickGPS == 0) {
+            StereoVision::Geometry::RigidBodyTransform<double> body2ecef = staticTrajSimulator.body2ecef(currentT);
+
+            posCache.push_back(StereoVisionApp::Trajectory::TimeCartesianBlock{.time=currentT,.val=body2ecef.t});
+
+            Eigen::Matrix3d topocentric2ecef = StereoVisionApp::Geo::localFrame2ECEFFromECEF(body2ecef.t, topocentricConvention);
+            Eigen::Vector3d orient = StereoVision::Geometry::inverseRodriguezFormula<double>(topocentric2ecef.transpose()*
+                                                                    StereoVision::Geometry::rodriguezFormula<double>(body2ecef.r)); //body2topocentric
+
+            orientCache.push_back(StereoVisionApp::Trajectory::TimeCartesianBlock{.time=currentT,.val=orient});
+
+            Eigen::Vector3d gps = staticTrajSimulator.gps(currentT);
+            Eigen::Vector3d gpsVelocity = staticTrajSimulator.gpsVelocity(currentT);
+
+            gpsCache.position->push_back(StereoVisionApp::Trajectory::TimeCartesianBlock{.time=currentT,.val=gps});
+            gpsCache.velocities->push_back(StereoVisionApp::Trajectory::TimeCartesianBlock{.time=currentT,.val=gpsVelocity});
+        }
+        Eigen::Vector3d gyro = staticTrajSimulator.gyro(currentT);
+        Eigen::Vector3d acc = staticTrajSimulator.acc(currentT);
+
+        gyroCache.push_back(StereoVisionApp::Trajectory::TimeCartesianBlock{.time=currentT,.val=gyro});
+        accCache.push_back(StereoVisionApp::Trajectory::TimeCartesianBlock{.time=currentT,.val=acc});
+
+        currentT += dt;
+        tickCount++;
+    }
+
+    genTraj->setCachedRawPos(posCache);
+    genTraj->setCachedRawOrient(orientCache);
+    genTraj->setCachedRawGps(gpsCache);
+    genTraj->setCachedRawGyro(gyroCache);
+    genTraj->setCachedRawAcc(accCache);
+
+    traj->setOrientationAngleRepresentation(StereoVisionApp::Trajectory::AxisAngle);
+    traj->setOrientationAngleUnits(StereoVisionApp::Trajectory::Radians);
+    traj->setOrientationTopocentricConvention(topocentricConvention);
+
+    traj->setPreIntegrationTime(0.5);
+    traj->setGpsAccuracy(0.02);
+    traj->setGyroAccuracy(0.1);
+    traj->setAccAccuracy(0.5);
+
+    constexpr bool computeUncertainty = false;
+
+    StereoVisionApp::ModularSBASolver sbaSolver(&project, computeUncertainty);
+    sbaSolver.setSilent(true);
+    sbaSolver.setFuncTolerance(1e-8);
+    sbaSolver.setParamsTolerance(1e-10);
+
+    StereoVisionApp::TrajectoryBaseSBAModule* trajSBAModule =
+        new StereoVisionApp::TrajectoryBaseSBAModule(traj->getPreIntegrationTime());
+    bool trajModuleAdded = sbaSolver.addModule(trajSBAModule);
+    QVERIFY(trajModuleAdded);
+
+    bool initSuccess = sbaSolver.init();
+
+    QVERIFY(initSuccess);
+
+    QVERIFY(sbaSolver.itemIsObservable(trajectoryId));
+
+    ceres::Problem* problem = sbaSolver.ceresProblem();
+
+    QVERIFY(problem != nullptr);
+
+    //check something was added in the factor graph
+    QVERIFY(problem->NumResidualBlocks() > 0);
+
+
+
+    bool optSuccess = sbaSolver.opt_step();
+
+    QVERIFY(optSuccess);
+
+    bool stdSuccess = sbaSolver.std_step();
+
+    QVERIFY(stdSuccess);
+
+    bool writeOk = sbaSolver.writeResults();
+
+    QVERIFY(writeOk);
+
+    bool writeStdOk = sbaSolver.writeUncertainty();
+
+    QVERIFY(writeStdOk);
+
+    sbaSolver.cleanup();
+
+    StereoVisionApp::StatusOptionalReturn<StereoVisionApp::Trajectory::TimeTrajectorySequence> optoptTraj =
+        traj->optimizedTrajectory();
+
+    QVERIFY(optoptTraj.isValid());
+
+    StereoVisionApp::Trajectory::TimeTrajectorySequence& optTraj = optoptTraj.value();
+
+    double worseDelta = 0;
+    double worseOrientationDelta = 0;
+    Eigen::Vector3d meanPosDelta = Eigen::Vector3d::Zero();
+    Eigen::Vector3d meanRotDelta = Eigen::Vector3d::Zero();
+
+    double threshold = 1e-4;
+    double thresholdOrientation = 1e-2;
+
+    StereoVisionApp::Simulation::WayPointsEcefTrajectoryFunctor gtTraj(waypointsECEF,speed,smoothTime);
+
+    for (int i = 0; i < optTraj.nPoints(); i++) {
+        auto& node = optTraj[i];
+
+        using D2Jet = ceres::Jet<ceres::Jet<double,1>,1>;
+
+        D2Jet jet_t;
+        jet_t.a.a = optTraj[i].time;
+        jet_t.a.v[0] = 1;
+        jet_t.v[0].a = 1;
+        StereoVision::Geometry::RigidBodyTransform<D2Jet> trajPosInrt = gtTraj.trajectory(jet_t);
+        StereoVision::Geometry::RigidBodyTransform<double> tpInrt;
+
+        for (int i = 0; i < 3; i++) {
+            tpInrt.r[i] = trajPosInrt.r[i].a.a;
+            tpInrt.t[i] = trajPosInrt.t[i].a.a;
+        }
+
+        StereoVision::Geometry::RigidBodyTransform<double> inrt2ecef(Eigen::Vector3d::Zero(),Eigen::Vector3d::Zero());
+        inrt2ecef.r.z() = -optTraj[i].time*StereoVisionApp::Geo::WGS84Ellipsoid::EarthRotationRate;
+
+        StereoVision::Geometry::RigidBodyTransform<double> trajPos = inrt2ecef*tpInrt;
+
+        Eigen::Vector3d expected(trajPos.t);
+        Eigen::Vector3d expectedOrientation(trajPos.r);
+
+        expected = ecef2Local*expected;
+
+        Eigen::Vector3d dPos = node.val.t - expected;
+        meanPosDelta += dPos;
+        Eigen::Vector3d dRot = StereoVision::Geometry::inverseRodriguezFormula<double>(
+            StereoVision::Geometry::rodriguezFormula<double>(node.val.r)*
+            StereoVision::Geometry::rodriguezFormula<double>(-expectedOrientation));
+        meanRotDelta += dRot;
+
+        double delta = dPos.norm();
+        double deltaOrientation = dRot.norm();
+
+        if (delta >= threshold) {
+            qWarning() << "About to fail with delta = " << delta << " (t = " << node.time << " position = "
+                       << node.val.t.x() << " " << node.val.t.y() << " " << node.val.t.z()
+                       << ", expected = " << expected.x() << " " << expected.y() << " " << expected.z() << ")";
+        }
+
+        if (deltaOrientation >= thresholdOrientation) {
+            qWarning() << "About to fail with deltaOrientation = " << deltaOrientation << " (t = " << node.time << " orientation = "
+                       << node.val.r.x() << " " << node.val.r.y() << " " << node.val.r.z()
+                       << ", expected = " << expectedOrientation.x() << " " << expectedOrientation.y() << " " << expectedOrientation.z() << ")";
+        }
+
+        worseDelta = std::max(delta, worseDelta);
+        worseOrientationDelta = std::max(deltaOrientation, worseOrientationDelta);
+        QVERIFY(delta < threshold);
+        QVERIFY(deltaOrientation < thresholdOrientation);
+    }
+
+    meanPosDelta /= optTraj.nPoints();
+    meanRotDelta /= optTraj.nPoints();
+
+    double biasThresholdOrientation = 1e-6;
+
+    qInfo() << "Mean position alignement error: " << meanPosDelta.norm() << "m";
+    qInfo() << "Mean orientation alignement error: " << meanRotDelta.norm() << "rad";
+
+    qInfo() << "Worse position alignement error: " << worseDelta << "m";
+    qInfo() << "Worse orientation alignement error: " << worseOrientationDelta << "rad";
+
+    QVERIFY(meanPosDelta.norm() < biasThresholdOrientation);
+    QVERIFY(meanRotDelta.norm() < biasThresholdOrientation);
 }
 
 QTEST_MAIN(TestSBASolver);

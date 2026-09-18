@@ -61,9 +61,45 @@ Trajectory::Trajectory(Project* parent) :
     _angularSpeedParameters._estimates_bias = false;
     _angularSpeedParameters._estimates_gain = false;
 
+    _positionFile = "";
+    _positionDefinition.pos_t_col = -1;
+    _positionDefinition.pos_x_col = -1;
+    _positionDefinition.pos_y_col = -1;
+    _positionDefinition.pos_z_col = -1;
+
+    _positionDefinition.timeDelta = 0;
+    _positionDefinition.timeScale = 1;
+
+    _orientationFile = "";
+    _orientationDefinition.orient_t_col = -1;
+    _orientationDefinition.orient_x_col = -1;
+    _orientationDefinition.orient_y_col = -1;
+    _orientationDefinition.orient_z_col = -1;
+
+    _orientationDefinition.timeDelta = 0;
+    _orientationDefinition.timeScale = 1;
+
+    _accelerationFile = "";
+    _accelerationDefinition.acc_t_col = -1;
+    _accelerationDefinition.acc_x_col = -1;
+    _accelerationDefinition.acc_y_col = -1;
+    _accelerationDefinition.acc_z_col = -1;
+
+    _accelerationDefinition.timeDelta = 0;
+    _accelerationDefinition.timeScale = 1;
+
+    _angularSpeedFile = "";
+    _angularSpeedDefinition.w_t_col = -1;
+    _angularSpeedDefinition.w_x_col = -1;
+    _angularSpeedDefinition.w_y_col = -1;
+    _angularSpeedDefinition.w_z_col = -1;
+
+    _angularSpeedDefinition.timeDelta = 0;
+    _angularSpeedDefinition.timeScale = 1;
+
     _gpsFile = "";
     _gpsDefinition.crs_epsg = "";
-    _gpsDefinition.topocentric_convention = NED;
+    _gpsDefinition.topocentric_convention = StereoVisionApp::Geo::NED;
 
     _gpsDefinition.timeDelta = 0;
     _gpsDefinition.timeScale = 1;
@@ -548,7 +584,7 @@ StatusOptionalReturn<Trajectory::RawGpsData> Trajectory::loadGPSData() const {
     Eigen::Array<double,3,Eigen::Dynamic> posData;
     posData.resize(3,positions.size());
 
-    for (int i = 0; i < positions.size(); i++) {
+    for (size_t i = 0; i < positions.size(); i++) {
         posData(0,i) = positions[i].val.x();
         posData(1,i) = positions[i].val.y();
         posData(2,i) = positions[i].val.z();
@@ -574,7 +610,7 @@ StatusOptionalReturn<Trajectory::RawGpsData> Trajectory::loadGPSData() const {
             return RType::error("Unexpected number of velocities returned!");
         }
 
-        for (int i = 0; i < velocities.size(); i++) {
+        for (size_t i = 0; i < velocities.size(); i++) {
             velocities[i].val = localFrames[i].R*velocities[i].val;
         }
     }
@@ -586,7 +622,7 @@ StatusOptionalReturn<Trajectory::RawGpsData> Trajectory::loadGPSData() const {
             return RType::error("Unexpected number of position covariances returned!");
         }
 
-        for (int i = 0; i < sigmas.size(); i++) {
+        for (size_t i = 0; i < sigmas.size(); i++) {
             sigmas[i].val = localFrames[i].R*sigmas[i].val*localFrames[i].R.transpose();
         }
     }
@@ -2739,7 +2775,8 @@ QJsonObject Trajectory::encodeJson() const {
 
     QJsonObject gpsDefinition;
 
-    gpsDefinition.insert("topocentric_convention", _gpsDefinition.topocentric_convention);
+    e = QMetaEnum::fromType<TopocentricConventionInternal>();
+    gpsDefinition.insert("topocentric_convention", e.valueToKey(_gpsDefinition.topocentric_convention));
     gpsDefinition.insert("crs_epsg", _gpsDefinition.crs_epsg);
 
     gpsDefinition.insert("time_delta", _gpsDefinition.timeDelta);
@@ -2777,7 +2814,7 @@ QJsonObject Trajectory::encodeJson() const {
 
     QJsonObject orientationDefinition;
 
-    e = QMetaEnum::fromType<TopocentricConvention>();
+    e = QMetaEnum::fromType<TopocentricConventionInternal>();
     orientationDefinition.insert("topocentric_convention", e.valueToKey(_orientationDefinition.topocentric_convention));
     e = QMetaEnum::fromType<AngleRepresentation>();
     orientationDefinition.insert("angle_representation", e.valueToKey(_orientationDefinition.angle_representation));
@@ -3112,14 +3149,14 @@ void Trajectory::configureFromJson(QJsonObject const& data) {
         }
 
         if (gpsDefinition.contains("topocentric_convention")) {
-            QMetaEnum e = QMetaEnum::fromType<TopocentricConvention>();
+            QMetaEnum e = QMetaEnum::fromType<TopocentricConventionInternal>();
             bool ok = true;
             int val = e.keysToValue(gpsDefinition.value("topocentric_convention").toString().toLocal8Bit().data(), &ok);
 
             if (ok) {
                 _gpsDefinition.topocentric_convention = static_cast<TopocentricConvention>(val);
             } else {
-                _gpsDefinition.topocentric_convention = NED; //default
+                _gpsDefinition.topocentric_convention = Geo::NED; //default
             }
         }
 
@@ -3252,7 +3289,7 @@ void Trajectory::configureFromJson(QJsonObject const& data) {
 
 
         _gpsDefinition.crs_epsg = "";
-        _gpsDefinition.topocentric_convention = NED;
+        _gpsDefinition.topocentric_convention = Geo::NED;
 
         _gpsDefinition.timeDelta = 0;
         _gpsDefinition.timeScale = 1;
@@ -3349,14 +3386,14 @@ void Trajectory::configureFromJson(QJsonObject const& data) {
         }
 
         if (orientationDefinition.contains("topocentric_convention")) {
-            QMetaEnum e = QMetaEnum::fromType<TopocentricConvention>();
+            QMetaEnum e = QMetaEnum::fromType<TopocentricConventionInternal>();
             bool ok = true;
             int val = e.keysToValue(orientationDefinition.value("topocentric_convention").toString().toLocal8Bit().data(), &ok);
 
             if (ok) {
                 _orientationDefinition.topocentric_convention = static_cast<TopocentricConvention>(val);
             } else {
-                _orientationDefinition.topocentric_convention = NED; //default
+                _orientationDefinition.topocentric_convention = StereoVisionApp::Geo::NED; //default
             }
         }
         if (orientationDefinition.contains("angle_representation")) {

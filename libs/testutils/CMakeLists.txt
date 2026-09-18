@@ -4,12 +4,14 @@ set(LIB_SRC
     standardprojectgenerators.cpp
      datablocks/generatedtrajectory.cpp
      eceftrajectoryinertialinstrumentssimulator.cpp
+     waypointssimulatedtrajectorysmoother.cpp
 )
 
 set(LIB_HEADERS
     standardprojectgenerators.h
     datablocks/generatedtrajectory.h
     eceftrajectoryinertialinstrumentssimulator.h
+    waypointssimulatedtrajectorysmoother.h
 )
 
 add_library(
@@ -19,7 +21,7 @@ add_library(
 )
 
 target_link_libraries(${TESTUTILS_LIB} PUBLIC Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui)
-target_link_libraries(${TESTUTILS_LIB} PUBLIC ${PROCESSING_LIB} ${DATA_LIB} StereoVision::stevi)
+target_link_libraries(${TESTUTILS_LIB} PUBLIC ${PROCESSING_LIB} ${DATA_LIB} ${GEO_LIB} StereoVision::stevi)
 
 install_stereovisionapp_sdklib(${TESTUTILS_LIB})
 

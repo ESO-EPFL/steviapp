@@ -82,6 +82,18 @@ public:
         return _orientationGenerator;
     }
 
+    inline void setCachedRawGyro(std::optional<std::vector<TimeCartesianBlock>> const& val) { _cached_raw_gyro = val;}
+    inline void setCachedRawAcc(std::optional<std::vector<TimeCartesianBlock>> const& val) { _cached_raw_acc = val;}
+    inline void setCachedRawPos(std::optional<std::vector<TimeCartesianBlock>> const& val) { _cached_raw_pos = val;}
+    inline void setCachedRawOrient(std::optional<std::vector<TimeCartesianBlock>> const& val) { _cached_raw_orientation = val;}
+    inline void setCachedRawGps(std::optional<RawGpsData> const& val) { _cached_raw_gps = val;}
+
+    inline void clearCachedRawGyro() { _cached_raw_gyro = std::nullopt;}
+    inline void clearCachedRawAcc() { _cached_raw_acc = std::nullopt;}
+    inline void clearCachedRawPos() { _cached_raw_pos = std::nullopt;}
+    inline void clearCachedRawOrient() { _cached_raw_orientation = std::nullopt;}
+    inline void clearCachedRawGps() { _cached_raw_gps = std::nullopt;}
+
 protected:
 
     virtual StatusOptionalReturn<std::vector<TimeCartesianBlock>> loadAngularSpeedRawData() const;
@@ -97,6 +109,12 @@ protected:
     TrajGeneratorInfos _accelerationGenerator;
     TrajGeneratorInfos _positionGenerator;
     TrajGeneratorInfos _orientationGenerator;
+
+    std::optional<std::vector<TimeCartesianBlock>> _cached_raw_gyro;
+    std::optional<std::vector<TimeCartesianBlock>> _cached_raw_acc;
+    std::optional<RawGpsData> _cached_raw_gps;
+    std::optional<std::vector<TimeCartesianBlock>> _cached_raw_pos;
+    std::optional<std::vector<TimeCartesianBlock>> _cached_raw_orientation;
 
 };
 

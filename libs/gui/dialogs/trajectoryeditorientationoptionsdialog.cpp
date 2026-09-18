@@ -28,7 +28,7 @@ TrajectoryEditOrientationOptionsDialog::TrajectoryEditOrientationOptionsDialog(Q
     formLayout->addRow(tr("Orientation file: "), _orientationFileLine);
 
     _topocentricConventionBox = new QComboBox(this);
-    QMetaEnum topoConv = QMetaEnum::fromType<Trajectory::TopocentricConvention>();
+    QMetaEnum topoConv = QMetaEnum::fromType<Trajectory::TopocentricConventionInternal>();
 
     for (int i = 0; i < topoConv.keyCount(); i++) {
         const char* key = topoConv.key(i);

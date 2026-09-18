@@ -3,6 +3,7 @@
 
 #include "testutils/datablocks/generatedtrajectory.h"
 #include "testutils/eceftrajectoryinertialinstrumentssimulator.h"
+#include "testutils/waypointssimulatedtrajectorysmoother.h"
 
 #include "geo/wgs84.h"
 
@@ -20,6 +21,8 @@ private Q_SLOTS:
 
     void testNestedJets();
     void testEcefTrajectoryInstrumentsSimulator();
+    void testWayPointsEcefTrajectoryInterpolation();
+    void testWayPointsEcefTrajectoryFunctor();
     void testGeneratedTrajectory();
 
 protected:
@@ -97,17 +100,20 @@ void TestTestUtils::testNestedJets() {
 void TestTestUtils::testEcefTrajectoryInstrumentsSimulator() {
 
     /*!
-     * \brief The StaticPlatformTrajectory class represent a
+     * \brief The StaticPlatformTrajectory class represent a static object in ecef frame
      */
-    class StaticPlatformTrajectory : public StereoVisionApp::Simulation::EcefTrajectoryFunctor {
+    class StaticPlatformTrajectory : public StereoVisionApp::Simulation::InertialTrajectoryFunctor {
     public:
         virtual StereoVision::Geometry::RigidBodyTransform<ceres::Jet<ceres::Jet<double,1>,1>> trajectory(ceres::Jet<ceres::Jet<double,1>,1> const& t) const override {
             ceres::Jet<ceres::Jet<double,1>,1> zero;
             zero.a.a = 0;
+            Eigen::Matrix<ceres::Jet<ceres::Jet<double,1>,1>,3,1> zeros(zero,zero,zero);
             ceres::Jet<ceres::Jet<double,1>,1> earthRadius;
             earthRadius.a.a = StereoVisionApp::Geo::WGS84Ellipsoid::SemiMajorAxis;
+
             Eigen::Matrix<ceres::Jet<ceres::Jet<double,1>,1>,3,1> rot(zero, zero, zero);
             Eigen::Matrix<ceres::Jet<ceres::Jet<double,1>,1>,3,1> pos(earthRadius, zero, zero);
+
             return StereoVision::Geometry::RigidBodyTransform<ceres::Jet<ceres::Jet<double,1>,1>>(rot, pos);
         }
 
@@ -140,6 +146,191 @@ void TestTestUtils::testEcefTrajectoryInstrumentsSimulator() {
             return g;
         }
     };
+
+    /*!
+     * \brief The InertialStaticPlatformTrajectory class represent a static object in static frame, which trajectory is expressed in ECEF
+     */
+    class InertialStaticPlatformTrajectory : public StereoVisionApp::Simulation::InertialTrajectoryFunctor {
+    public:
+        virtual StereoVision::Geometry::RigidBodyTransform<ceres::Jet<ceres::Jet<double,1>,1>> trajectory(ceres::Jet<ceres::Jet<double,1>,1> const& t) const override {
+            ceres::Jet<ceres::Jet<double,1>,1> zero;
+            zero.a.a = 0;
+            Eigen::Matrix<ceres::Jet<ceres::Jet<double,1>,1>,3,1> zeros(zero,zero,zero);
+            ceres::Jet<ceres::Jet<double,1>,1> earthRadius;
+            earthRadius.a.a = StereoVisionApp::Geo::WGS84Ellipsoid::SemiMajorAxis;
+            ceres::Jet<ceres::Jet<double,1>,1> rotRate;
+            rotRate.a.a = StereoVisionApp::Geo::WGS84Ellipsoid::EarthRotationRate;
+
+            ceres::Jet<ceres::Jet<double,1>,1> angle = -t*rotRate;
+
+            Eigen::Matrix<ceres::Jet<ceres::Jet<double,1>,1>,3,1> rot(zero, zero, angle);
+            Eigen::Matrix<ceres::Jet<ceres::Jet<double,1>,1>,3,1> pos(cos(angle)*earthRadius, sin(angle)*earthRadius, zero);
+
+            return StereoVision::Geometry::RigidBodyTransform<ceres::Jet<ceres::Jet<double,1>,1>>(rot, pos);
+        }
+
+        static Eigen::Vector3d positionGt(double t) {
+            double radius = StereoVisionApp::Geo::WGS84Ellipsoid::SemiMajorAxis;
+            double rotRate = StereoVisionApp::Geo::WGS84Ellipsoid::EarthRotationRate;
+            double angle = -t*rotRate;
+            return Eigen::Matrix<double,3,1>(cos(angle)*radius, sin(angle)*radius, 0);
+        }
+
+        static Eigen::Vector3d orientationGt(double t) {
+            return Eigen::Matrix<double,3,1>(0, 0, -t*StereoVisionApp::Geo::WGS84Ellipsoid::EarthRotationRate);
+        }
+
+        static Eigen::Vector3d gpsGt(double t) {
+            return positionGt(t);
+        }
+
+        static Eigen::Vector3d gpsVelocityGt(double t) {
+            double rotRate = StereoVisionApp::Geo::WGS84Ellipsoid::EarthRotationRate;
+            double earthRadius = StereoVisionApp::Geo::WGS84Ellipsoid::SemiMajorAxis;
+
+            double angle = -t*rotRate;
+            double speed = -rotRate*earthRadius;
+
+            Eigen::Matrix<double,3,1> speed_ecef(-sin(angle)*speed, cos(angle)*speed, 0);
+
+            constexpr char wgs84_ecef[] = "EPSG:4978";
+            const StereoVisionApp::Geo::TopocentricConvention topoConv = static_cast<StereoVisionApp::Geo::TopocentricConvention>(
+                StereoVisionApp::Simulation::EcefTrajectoryInertialInstrumentsSimulator::LocalFrameDefinitionUsed);
+            std::optional<StereoVision::Geometry::RigidBodyTransform<double>> local2ecefOpt =
+                StereoVisionApp::Geo::getLTPC2ECEF(positionGt(t), wgs84_ecef, topoConv);
+
+            StereoVision::Geometry::RigidBodyTransform<double> local2ecef(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+
+            if (local2ecefOpt.has_value()) {
+                local2ecef = local2ecefOpt.value();
+            }
+
+            return StereoVision::Geometry::angleAxisRotate<double>(-local2ecef.r, speed_ecef);
+        }
+
+        static Eigen::Vector3d gyroGt(double t) {
+            return Eigen::Matrix<double,3,1>(0, 0, 0);
+        }
+
+        static Eigen::Vector3d accGt(double t) {
+            auto gTmp = StereoVisionApp::Geo::WGS84Ellipsoid::gravityEcefModel(positionGt(t));
+            Eigen::Vector3d g;
+            for (int i = 0; i < 3; i++) {
+                g[i] = gTmp[i];
+            }
+
+            Eigen::Vector3d posEcef = positionGt(t);
+
+            double x = posEcef.x();
+            double y = posEcef.y();
+
+            double rotRateScale = StereoVisionApp::Geo::WGS84Ellipsoid::EarthRotationRate*StereoVisionApp::Geo::WGS84Ellipsoid::EarthRotationRate;
+            Eigen::Vector3d gDelta = Eigen::Vector3d(rotRateScale*x,rotRateScale*y,0); //compensate for centripedal acceleration already accounted for in gravity model
+
+            g += gDelta;
+
+            Eigen::Matrix<double,3,1> r_ecef_2_local(0, 0, t*StereoVisionApp::Geo::WGS84Ellipsoid::EarthRotationRate);
+
+            return StereoVision::Geometry::angleAxisRotate(r_ecef_2_local, g);
+        }
+    };
+
+    constexpr double move_north_speed = 200;
+
+    class MoveNorthTrajectory : public StereoVisionApp::Simulation::InertialTrajectoryFunctor {
+    public:
+        virtual StereoVision::Geometry::RigidBodyTransform<ceres::Jet<ceres::Jet<double,1>,1>> trajectory(ceres::Jet<ceres::Jet<double,1>,1> const& t) const override {
+            ceres::Jet<ceres::Jet<double,1>,1> zero;
+            zero.a.a = 0;
+            Eigen::Matrix<ceres::Jet<ceres::Jet<double,1>,1>,3,1> zeros(zero,zero,zero);
+            ceres::Jet<ceres::Jet<double,1>,1> earthRadius;
+            earthRadius.a.a = StereoVisionApp::Geo::WGS84Ellipsoid::SemiMajorAxis;
+
+            ceres::Jet<ceres::Jet<double,1>,1> speed;
+            speed.a.a = move_north_speed; //200m/s
+
+            ceres::Jet<ceres::Jet<double,1>,1> dist = t*speed;
+            ceres::Jet<ceres::Jet<double,1>,1> angle = dist / earthRadius;
+
+            Eigen::Matrix<ceres::Jet<ceres::Jet<double,1>,1>,3,1> rot(zero, angle, zero);
+            Eigen::Matrix<ceres::Jet<ceres::Jet<double,1>,1>,3,1> pos(cos(angle)*earthRadius, zero, sin(angle)*earthRadius);
+
+            return StereoVision::Geometry::RigidBodyTransform<ceres::Jet<ceres::Jet<double,1>,1>>(rot, pos);
+        }
+
+        static Eigen::Vector3d positionGt(double t) {
+            constexpr double earthRadius = StereoVisionApp::Geo::WGS84Ellipsoid::SemiMajorAxis;
+            double dist = t*move_north_speed;
+            double angle = dist / earthRadius;
+            return Eigen::Matrix<double,3,1>(cos(angle)*earthRadius, 0, sin(angle)*earthRadius);
+        }
+
+        static Eigen::Vector3d orientationGt(double t) {
+            constexpr double earthRadius = StereoVisionApp::Geo::WGS84Ellipsoid::SemiMajorAxis;
+            double dist = t*move_north_speed;
+            double angle = dist / earthRadius;
+            return Eigen::Matrix<double,3,1>(0, angle, 0);
+        }
+
+        static Eigen::Vector3d gpsGt(double t) {
+            return positionGt(t);
+        }
+
+        static Eigen::Vector3d gpsVelocityGt(double t) {
+            constexpr double earthRadius = StereoVisionApp::Geo::WGS84Ellipsoid::SemiMajorAxis;
+            double dist = t*move_north_speed;
+            double angle = dist / earthRadius;
+
+            Eigen::Matrix<double,3,1> speed_ecef(-sin(angle)*move_north_speed, 0, cos(angle)*move_north_speed);
+
+            constexpr char wgs84_ecef[] = "EPSG:4978";
+            const StereoVisionApp::Geo::TopocentricConvention topoConv = static_cast<StereoVisionApp::Geo::TopocentricConvention>(
+                StereoVisionApp::Simulation::EcefTrajectoryInertialInstrumentsSimulator::LocalFrameDefinitionUsed);
+            std::optional<StereoVision::Geometry::RigidBodyTransform<double>> local2ecefOpt =
+                StereoVisionApp::Geo::getLTPC2ECEF(positionGt(t), wgs84_ecef, topoConv);
+
+            StereoVision::Geometry::RigidBodyTransform<double> local2ecef(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+
+            if (local2ecefOpt.has_value()) {
+                local2ecef = local2ecefOpt.value();
+            }
+
+            return StereoVision::Geometry::angleAxisRotate<double>(-local2ecef.r, speed_ecef);
+        }
+
+        static Eigen::Vector3d gyroGt(double t) {
+            constexpr double earthRadius = StereoVisionApp::Geo::WGS84Ellipsoid::SemiMajorAxis;
+            double angle_speed = move_north_speed / earthRadius;
+            double dist = t*move_north_speed;
+            double angle = dist / earthRadius;
+            return Eigen::Matrix<double,3,1>(-sin(angle)*StereoVisionApp::Geo::WGS84Ellipsoid::EarthRotationRate,
+                                               angle_speed,
+                                               cos(angle)*StereoVisionApp::Geo::WGS84Ellipsoid::EarthRotationRate);
+        }
+
+        static Eigen::Vector3d accGt(double t) {
+            auto gTmp = StereoVisionApp::Geo::WGS84Ellipsoid::gravityEcefModel(positionGt(t));
+            Eigen::Vector3d acc;
+            for (int i = 0; i < 3; i++) {
+                acc[i] = gTmp[i];
+            }
+
+            constexpr double earthRadius = StereoVisionApp::Geo::WGS84Ellipsoid::SemiMajorAxis;
+            double angle_speed = move_north_speed / earthRadius;
+            double dist = t*move_north_speed;
+            double angle = dist / earthRadius;
+
+            Eigen::Vector3d accRot = Eigen::Vector3d(-cos(angle)*angle_speed*angle_speed*earthRadius,0,-sin(angle)*angle_speed*angle_speed*earthRadius);
+            Eigen::Vector3d accCoriolis = -2*Eigen::Vector3d(0,0,StereoVisionApp::Geo::WGS84Ellipsoid::EarthRotationRate).cross(
+                Eigen::Vector3d(sin(angle)*move_north_speed,0,cos(angle)*move_north_speed));
+
+            Eigen::Matrix<double,3,1> r_ecef_2_local(0, -angle, 0);
+
+            return StereoVision::Geometry::angleAxisRotate<double>(r_ecef_2_local, acc + accRot + accCoriolis);
+        }
+    };
+
+    //test trajectories
 
     StaticPlatformTrajectory* staticTraj = new StaticPlatformTrajectory();
 
@@ -179,6 +370,257 @@ void TestTestUtils::testEcefTrajectoryInstrumentsSimulator() {
 
     }
 
+    InertialStaticPlatformTrajectory* inertialStaticTraj = new InertialStaticPlatformTrajectory();
+
+    StereoVisionApp::Simulation::EcefTrajectoryInertialInstrumentsSimulator inertialStaticTrajSimulator(inertialStaticTraj);
+
+    for (double t : testTimes) {
+
+        Eigen::Vector3d gpsGt = InertialStaticPlatformTrajectory::gpsGt(t);
+        Eigen::Vector3d gpsPred = inertialStaticTrajSimulator.gps(t);
+
+        for (int i = 0; i < 3; i++) {
+            QCOMPARE(gpsPred[i],gpsGt[i]);
+        }
+
+        Eigen::Vector3d gpsVelocityGt = InertialStaticPlatformTrajectory::gpsVelocityGt(t);
+        Eigen::Vector3d gpsVelocityPred = inertialStaticTrajSimulator.gpsVelocity(t);
+
+        for (int i = 0; i < 3; i++) {
+            QCOMPARE(gpsVelocityPred[i],gpsVelocityGt[i]);
+        }
+
+        Eigen::Vector3d gyroGt = InertialStaticPlatformTrajectory::gyroGt(t);
+        Eigen::Vector3d gyroPred = inertialStaticTrajSimulator.gyro(t);
+
+        for (int i = 0; i < 3; i++) {
+            QCOMPARE(gyroPred[i],gyroGt[i]);
+        }
+
+        Eigen::Vector3d accGt = InertialStaticPlatformTrajectory::accGt(t);
+        Eigen::Vector3d accPred = inertialStaticTrajSimulator.acc(t);
+
+        for (int i = 0; i < 3; i++) {
+            QCOMPARE(accPred[i],accGt[i]);
+        }
+
+    }
+
+    MoveNorthTrajectory* moveNorthTraj = new MoveNorthTrajectory();
+
+    StereoVisionApp::Simulation::EcefTrajectoryInertialInstrumentsSimulator moveNorthTrajSimulator(moveNorthTraj);
+
+    testTimes = {0.,4000000/move_north_speed,8000000/move_north_speed};
+
+    for (double t : testTimes) {
+
+        Eigen::Vector3d gpsGt = MoveNorthTrajectory::gpsGt(t);
+        Eigen::Vector3d gpsPred = moveNorthTrajSimulator.gps(t);
+
+        for (int i = 0; i < 3; i++) {
+            QCOMPARE(gpsPred[i],gpsGt[i]);
+        }
+
+        Eigen::Vector3d gpsVelocityGt = MoveNorthTrajectory::gpsVelocityGt(t);
+        Eigen::Vector3d gpsVelocityPred = moveNorthTrajSimulator.gpsVelocity(t);
+
+        for (int i = 0; i < 3; i++) {
+            QCOMPARE(gpsVelocityPred[i],gpsVelocityGt[i]);
+        }
+
+        Eigen::Vector3d gyroGt = MoveNorthTrajectory::gyroGt(t);
+        Eigen::Vector3d gyroPred = moveNorthTrajSimulator.gyro(t);
+
+        for (int i = 0; i < 3; i++) {
+            QVERIFY(abs(gyroPred[i]-gyroGt[i]) < 1e-10);
+        }
+
+        Eigen::Vector3d accGt = MoveNorthTrajectory::accGt(t);
+        Eigen::Vector3d accPred = moveNorthTrajSimulator.acc(t);
+
+        for (int i = 0; i < 3; i++) {
+            QCOMPARE(accPred[i],accGt[i]);
+        }
+
+    }
+
+}
+void TestTestUtils::testWayPointsEcefTrajectoryInterpolation() {
+
+    double timeRadius = 3;
+    double t0 = 0;
+    double t1 = 4*timeRadius;
+    double t = 2*timeRadius;
+    double v = 42;
+
+    std::vector<double> ts{t0,t1};
+    std::vector<double> ys{v,v};
+
+    double interpolated = StereoVisionApp::Simulation::WayPointsSimulatedTrajectorySmoother::evaluateSmoothedCurve(t,ys,ts,timeRadius);
+
+    timeRadius = 3;
+    t0 = 0;
+    t1 = 4*timeRadius;
+    t = 0;
+    v = 42;
+
+    ts = {t0,t1};
+    ys = {v,v};
+
+    interpolated = StereoVisionApp::Simulation::WayPointsSimulatedTrajectorySmoother::evaluateSmoothedCurve(t,ys,ts,timeRadius);
+
+    QCOMPARE(interpolated, v);
+
+    t = t1;
+
+    interpolated = StereoVisionApp::Simulation::WayPointsSimulatedTrajectorySmoother::evaluateSmoothedCurve(t,ys,ts,timeRadius);
+
+    QCOMPARE(interpolated, v);
+
+    timeRadius = 2.5;
+    t0 = 0;
+    t1 = 50;
+    t = 12;
+    v = 27;
+
+    ts = {t0,t1};
+    ys = {v,v};
+
+    interpolated = StereoVisionApp::Simulation::WayPointsSimulatedTrajectorySmoother::evaluateSmoothedCurve(t,ys,ts,timeRadius);
+
+    QCOMPARE(interpolated, v);
+
+    ys = {t0,t1};
+
+    interpolated = StereoVisionApp::Simulation::WayPointsSimulatedTrajectorySmoother::evaluateSmoothedCurve(t,ys,ts,timeRadius);
+
+    QCOMPARE(interpolated, t);
+
+    t = t0;
+    interpolated = StereoVisionApp::Simulation::WayPointsSimulatedTrajectorySmoother::evaluateSmoothedCurve(t,ys,ts,timeRadius);
+
+    QCOMPARE(interpolated, t);
+
+    t = t1;
+    interpolated = StereoVisionApp::Simulation::WayPointsSimulatedTrajectorySmoother::evaluateSmoothedCurve(t,ys,ts,timeRadius);
+
+    QCOMPARE(interpolated, t);
+
+    double t025 = t-timeRadius/2;
+    double t075 = t+timeRadius/2;
+    ts = {t0,t025,t075,t1};
+    double v0 = 33;
+    double v1 = 69;
+    v = (v0 + v1)/2;
+    ys = {v0,v0,v1,v1};
+
+    interpolated = StereoVisionApp::Simulation::WayPointsSimulatedTrajectorySmoother::evaluateSmoothedCurve(t,ys,ts,timeRadius);
+
+    QCOMPARE(interpolated, v);
+
+}
+void TestTestUtils::testWayPointsEcefTrajectoryFunctor() {
+    std::vector<std::array<double,3>> waypointsLatLonHeight = {
+        {46.03565599595825, 7.089615022981861, 1799.531696490634},
+        {46.02236597934959, 7.100801500967546, 2079.217496895602},
+        {46.02146192956894, 7.098090353995183, 2151.688920219349},
+        {46.03492177897298, 7.087220353061962, 1878.258324937554},
+        {46.03415309208045, 7.084722826378558, 1970.722415288687},
+        {46.02075179505419, 7.095398910133803, 2248.271703936763},
+        {46.01940077040931, 7.092369767149918, 2135.304159701515},
+        {46.03315085745567, 7.082298945193353, 2079.826442641198}
+    };
+
+    std::vector<std::array<double,3>> waypointsECEF(waypointsLatLonHeight.size());
+
+    for (size_t i = 0; i < waypointsLatLonHeight.size(); i++) {
+        waypointsECEF[i] = StereoVisionApp::Geo::WGS84Ellipsoid::LatLonHeight2ECEF(waypointsLatLonHeight[i]);
+    }
+
+    double speed = 10; // 10 m/s
+    double smoothTime = 3; // 3 s
+
+    StereoVisionApp::Simulation::WayPointsEcefTrajectoryFunctor trajFunctor =
+        StereoVisionApp::Simulation::WayPointsEcefTrajectoryFunctor::fromWGS84WayPoints(waypointsLatLonHeight,
+                                                             speed,
+                                                             smoothTime);
+
+
+    StereoVisionApp::Simulation::WayPointsSimulatedTrajectorySmoother::TimesWaypointsSet<double> positionWaypoints =
+        trajFunctor.positionWaypoints();
+    StereoVisionApp::Simulation::WayPointsSimulatedTrajectorySmoother::TimesWaypointsSet<double> orientationWaypoints =
+        trajFunctor.orientationWaypoints();
+
+    QCOMPARE(positionWaypoints.samples.size(), waypointsLatLonHeight.size());
+    QCOMPARE(positionWaypoints.times.size(), positionWaypoints.samples.size());
+    QCOMPARE(orientationWaypoints.times.size(), orientationWaypoints.samples.size());
+
+    std::vector<double> const& nodeTimes = positionWaypoints.times;
+
+    for (size_t i = 0; i < nodeTimes.size()-1; i++) {
+        QVERIFY(nodeTimes[i] < nodeTimes[i+1]);
+    }
+
+    std::vector<std::array<double,3>> const& nodeSamples = positionWaypoints.samples;
+
+    using D2Jet = StereoVisionApp::Simulation::WayPointsEcefTrajectoryFunctor::D2Jet;
+
+    for (size_t i = 0; i < nodeTimes.size()-1; i++) {
+
+        double midPoint = (nodeTimes[i] + nodeTimes[i+1])/2;
+
+        D2Jet jet_t;
+        jet_t.a.a = midPoint;
+        jet_t.a.v[0] = 1;
+        jet_t.v[0].a = 1;
+
+        auto pose = trajFunctor.trajectory(jet_t);
+
+        std::array<double, 3> interpolated;
+        std::array<double, 3> pos;
+
+        std::array<double, 3> orient;
+
+        std::array<double, 3> d_pos;
+        std::array<double, 3> d_orient;
+
+        std::array<double, 3> d_pos_alt;
+        std::array<double, 3> d_orient_alt;
+
+        std::array<double, 3> d2_pos;
+        std::array<double, 3> d2_orient;
+
+        for (int j = 0; j < 3; j++) {
+            interpolated[j] = (nodeSamples[i][j] + nodeSamples[i+1][j])/2;
+            pos[j] = pose.t[j].a.a;
+            orient[j] = pose.r[j].a.a;
+
+            d_pos[j] = pose.t[j].v[0].a;
+            d_orient[j] = pose.r[j].v[0].a;
+
+            d_pos_alt[j] = pose.t[j].a.v[0];
+            d_orient_alt[j] = pose.r[j].a.v[0];
+
+            d2_pos[j] = pose.t[j].v[0].v[0];
+            d2_orient[j] = pose.r[j].v[0].v[0];
+        }
+
+        for (int j = 0; j < 3; j++) {
+            constexpr double tol = 1e-6;
+            QVERIFY(std::abs(interpolated[j] - pos[j]) < tol);
+
+            QVERIFY(std::isfinite(orient[j]));
+
+            QVERIFY(std::isfinite(d_pos[j]));
+            QVERIFY(std::isfinite(d_orient[j]));
+
+            QCOMPARE(d_pos[j], d_pos_alt[j]);
+            QCOMPARE(d_orient[j], d_orient_alt[j]);
+
+            QVERIFY(std::isfinite(d2_pos[j]));
+            QVERIFY(std::isfinite(d2_orient[j]));
+        }
+    }
 }
 
 void TestTestUtils::testGeneratedTrajectory() {

@@ -151,6 +151,9 @@ void TrajectoryAlignementAnalysisEditor::reconfigurePlots() {
 
     bool valid_trajectory = true;
 
+    StereoVision::Geometry::AffineTransform<double> projectEcef2Local;
+    StereoVision::Geometry::AffineTransform<double> projectLocal2ecef;
+
     if (_trajectory == nullptr) {
         valid_trajectory = false;
     } else {
@@ -185,6 +188,16 @@ void TrajectoryAlignementAnalysisEditor::reconfigurePlots() {
             QMessageBox::warning(this, tr("Invalid trajectory"), tr("Could not load accelerometer data: %1").arg(accelerometerOpt.errorMessage()));
             valid_trajectory = false;
         }
+
+        Project* p = _trajectory->getProject();
+
+        if (p == nullptr) {
+            QMessageBox::warning(this, tr("Invalid trajectory"), tr("Trajectory is not part of a project!"));
+            valid_trajectory = false;
+        }
+
+        projectEcef2Local = p->ecef2local();
+        projectLocal2ecef = StereoVision::Geometry::AffineTransform<double>(projectEcef2Local.R.transpose(), -projectEcef2Local.R.transpose()*projectEcef2Local.t);
 
     }
 
@@ -290,6 +303,7 @@ void TrajectoryAlignementAnalysisEditor::reconfigurePlots() {
 
         StereoVision::Geometry::RigidBodyTransform<double> body2_to_body1 = body1_to_local.val.inverse()*body2_to_local.val;
         StereoVision::Geometry::AffineTransform<double> body2_to_body1Aff = body2_to_body1.toAffineTransform();
+        body2_to_body1.r = StereoVision::Geometry::inverseRodriguezFormula(body2_to_body1Aff.R);
 
         Eigen::Matrix3d GyroR2to1 = PreIntegrateGyro(gyro, body1_to_local.time, body2_to_local.time);
 
@@ -331,6 +345,9 @@ void TrajectoryAlignementAnalysisEditor::reconfigurePlots() {
         }
 
         if (i+2*deltai < traj.nPoints()) {
+
+            auto ecefPos = projectLocal2ecef*body1_to_local.val.t;
+
             Trajectory::TimeTrajectorySequence::TimedElement body3_to_local = traj[i+2*deltai];
 
             StereoVision::Geometry::RigidBodyTransform<double> body3_to_body1 = body1_to_local.val.inverse()*body3_to_local.val;
@@ -338,7 +355,8 @@ void TrajectoryAlignementAnalysisEditor::reconfigurePlots() {
             Eigen::Vector3d speed1 = body2_to_body1.t / (body2_to_local.time - body1_to_local.time);
             Eigen::Vector3d speed2 = (body3_to_body1.t - body2_to_body1.t) / (body3_to_local.time - body2_to_local.time);
 
-            Eigen::Vector3d gravity(0,0,9.81);
+            std::array<double,3> gravity_ecef = Geo::WGS84Ellipsoid::gravityEcefModel(ecefPos);
+            Eigen::Vector3d gravity = projectEcef2Local.R*Eigen::Vector3d(gravity_ecef[0], gravity_ecef[1], gravity_ecef[2]);
             gravity = StereoVision::Geometry::angleAxisRotate<double>(-body1_to_local.val.r, gravity);
 
             double timespeed1 = (body2_to_local.time + body1_to_local.time)/2;

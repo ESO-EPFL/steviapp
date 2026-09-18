@@ -28,6 +28,10 @@ void GeneratedTrajectory::configureStandardNonAccelaratingTrajectory(double t0,
 
 StatusOptionalReturn<std::vector<Trajectory::TimeCartesianBlock>> GeneratedTrajectory::loadAngularSpeedRawData() const {
 
+    if (_cached_raw_gyro.has_value()) {
+        return _cached_raw_gyro.value();
+    }
+
     if (!_angularSpeedGenerator.functor) {
         return Trajectory::loadAngularSpeedRawData();
     }
@@ -53,6 +57,10 @@ StatusOptionalReturn<std::vector<Trajectory::TimeCartesianBlock>> GeneratedTraje
 }
 StatusOptionalReturn<std::vector<Trajectory::TimeCartesianBlock>> GeneratedTrajectory::loadAccelerationRawData() const {
 
+    if (_cached_raw_acc.has_value()) {
+        return _cached_raw_acc.value();
+    }
+
     if (!_accelerationGenerator.functor) {
         return Trajectory::loadAccelerationRawData();
     }
@@ -76,9 +84,16 @@ StatusOptionalReturn<std::vector<Trajectory::TimeCartesianBlock>> GeneratedTraje
     return ret;
 }
 StatusOptionalReturn<Trajectory::RawGpsData> GeneratedTrajectory::loadRawGPSData() const {
+    if (_cached_raw_gps.has_value()) {
+        return _cached_raw_gps.value();
+    }
     return StatusOptionalReturn<Trajectory::RawGpsData>::error("Not implemented yet");
 }
 StatusOptionalReturn<std::vector<Trajectory::TimeCartesianBlock>> GeneratedTrajectory::loadPositionRawData() const {
+
+    if (_cached_raw_pos.has_value()) {
+        return _cached_raw_pos.value();
+    }
 
     if (!_positionGenerator.functor) {
         return Trajectory::loadPositionRawData();
@@ -103,6 +118,10 @@ StatusOptionalReturn<std::vector<Trajectory::TimeCartesianBlock>> GeneratedTraje
     return ret;
 }
 StatusOptionalReturn<std::vector<Trajectory::TimeCartesianBlock>> GeneratedTrajectory::loadOrientationRawData() const {
+
+    if (_cached_raw_orientation.has_value()) {
+        return _cached_raw_orientation.value();
+    }
 
     if (!_orientationGenerator.functor) {
         return Trajectory::loadOrientationRawData();

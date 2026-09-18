@@ -160,7 +160,7 @@ void TestFunctionalUtils::testGenericDecorators() {
         for (int i = 0; i < argsSize; i++) {
             arg1[i] = random_dist_base(_re);
             arg2[i] = random_dist_base(_re);
-            expected[i] = (arg1[i] - arg2[i])/dt;
+            expected[i] = (arg2[i] - arg1[i])/dt;
         }
 
         std::array<double, argsSize> res;

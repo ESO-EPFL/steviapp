@@ -293,6 +293,10 @@ void TrajectoryComparisonEditor::reconfigurePlots() {
             delta = opt*initial.inverse();
         }
 
+        //renormalize
+        Eigen::Matrix3d Rmat = StereoVision::Geometry::rodriguezFormula(delta.r);
+        delta.r = StereoVision::Geometry::inverseRodriguezFormula(Rmat);
+
         posXerrors[i] = initial.t.x() - opt.t.x();
         posYerrors[i] = initial.t.y() - opt.t.y();
         posZerrors[i] = initial.t.z() - opt.t.z();

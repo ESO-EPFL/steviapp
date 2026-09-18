@@ -484,6 +484,60 @@ public:
 
 };
 
+template <typename FunctorT, int argsSize, std::size_t arg0id>
+class FiniteDifference : private FunctorT
+{
+public:
+
+    template <typename ... P>
+    FiniteDifference(double dt, P... args) :
+        FunctorT(args...),
+        _dt(dt)
+    {
+
+    }
+
+    template <typename ... P>
+    bool operator()(P ... params) const {
+
+        std::tuple<P...> args(params...);
+
+        using T = std::remove_const_t<
+            std::remove_pointer_t<
+                std::remove_reference_t<decltype (std::get<0>(args))>
+                >>;
+
+        // get both arguments.
+
+        T const* arg0 = std::get<arg0id>(args);
+        T const* arg1 = std::get<arg0id+1>(args);
+
+        std::array<T,argsSize> diff;
+        T dt(_dt);
+
+        for (int i = 0; i < argsSize; i++) {
+            diff[i] = arg1[i] - arg0[i];
+            diff[i] /= dt;
+        }
+
+        auto processedArgs =
+            CallFromTuple::insertArgInTuple<arg0id, const T*>(
+                CallFromTuple::removeArgFromTuple<arg0id>(
+                    CallFromTuple::removeArgFromTuple<arg0id+1>(args)
+                ), diff.data());
+
+        auto variadic_lambda = [this] (auto... params) {
+            (void) this; //remove useless warning.
+            return FunctorT::operator()(params...);
+        };
+
+        return CallFromTuple::call(variadic_lambda, processedArgs);
+    }
+
+protected:
+
+    double _dt;
+};
 
 }
 
